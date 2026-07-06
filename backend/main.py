@@ -403,7 +403,7 @@ def enter_result(league_id: int, body: ResultBody):
     conn.close()
     return {"ok": True}
 
- import urllib.request
+import urllib.request
 import json as _json
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
