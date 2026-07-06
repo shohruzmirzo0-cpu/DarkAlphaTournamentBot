@@ -403,6 +403,46 @@ def enter_result(league_id: int, body: ResultBody):
     conn.close()
     return {"ok": True}
 
+ import urllib.request
+import json as _json
 
+TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None):
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    data = _json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{TELEGRAM_API}/sendMessage",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10)
+    except Exception:
+        pass
+
+
+@app.post("/webhook")
+async def telegram_webhook(update: dict):
+    message = update.get("message") or {}
+    text = message.get("text", "")
+    chat_id = message.get("chat", {}).get("id")
+    if chat_id and text.startswith("/start"):
+        webapp_url = os.getenv("WEBAPP_URL", "")
+        if webapp_url:
+            reply_markup = {
+                "inline_keyboard": [[
+                    {"text": "🏆 Turnirni ochish", "web_app": {"url": webapp_url}}
+                ]]
+            }
+            send_telegram_message(
+                chat_id,
+                "⚽ <b>eFootball Turnir</b>ga xush kelibsiz!\n\nLiga tanlash, ro'yxatdan o'tish, jadval va reyting jadvalini ko'rish uchun quyidagi tugmani bosing 👇",
+                reply_markup,
+            )
+    return {"ok": True}
 # Static frontend fayllarni xizmat qilish (index.html shu yerdan ochiladi)
 app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
