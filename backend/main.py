@@ -47,12 +47,20 @@ def db() -> sqlite3.Connection:
 
 
 DEFAULT_LEAGUES = [
-    # key, name, capacity, color1, color2, icon
-    ("laliga", "LaLiga", 32, "#ff3d54", "#3d1b7a", "⚽"),
-    ("premier", "Premier Liga", 32, "#3a1c71", "#6a1b9a", "🦁"),
-    ("bundesliga", "Bundesliga", 32, "#d31027", "#1a1a2e", "🦅"),
-    ("seriea", "Serie A", 32, "#0f3460", "#16213e", "⭐"),
-    ("ligue1", "Ligue 1", 32, "#1e3c72", "#2a5298", "🐓"),
+    # key, name, capacity, color1, color2, icon, club_mode
+    ("laliga", "LaLiga", 32, "#ff3d54", "#3d1b7a", "⚽", 0),
+    ("premier", "Premier Liga", 32, "#3a1c71", "#6a1b9a", "🦁", 0),
+    ("bundesliga", "Bundesliga", 32, "#d31027", "#1a1a2e", "🦅", 0),
+    ("seriea", "Serie A", 32, "#0f3460", "#16213e", "⭐", 0),
+    ("ligue1", "Ligue 1", 32, "#1e3c72", "#2a5298", "🐓", 0),
+    ("division1", "Divizion 1", 20, "#ff3d54", "#3d1b7a", "🏆", 1),
+]
+
+DIVISION1_CLUBS = [
+    "Almeria", "Athletic Club", "Atlético Madrid", "Barcelona", "Betis",
+    "Cádiz", "Celta Vigo", "Getafe", "Girona", "Granada",
+    "Las Palmas", "Mallorca", "Osasuna", "Rayo Vallecano", "Real Madrid",
+    "Real Sociedad", "Sevilla", "Valencia", "Villarreal", "Alavés",
 ]
 
 
@@ -69,6 +77,7 @@ def init_db() -> None:
             color2 TEXT DEFAULT '#0f3460',
             icon TEXT DEFAULT '⚽',
             status TEXT NOT NULL DEFAULT 'reg',
+            club_mode INTEGER DEFAULT 0,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -78,6 +87,7 @@ def init_db() -> None:
             telegram_id INTEGER NOT NULL,
             full_name TEXT NOT NULL,
             username TEXT,
+            club_name TEXT,
             UNIQUE(league_id, telegram_id)
         );
 
@@ -93,11 +103,21 @@ def init_db() -> None:
         );
         """
     )
-    for key, name, cap, c1, c2, icon in DEFAULT_LEAGUES:
+    # Eski (oldin yaratilgan) bazalarni yangi ustunlar bilan moslashtirish
+    for stmt in (
+        "ALTER TABLE leagues ADD COLUMN club_mode INTEGER DEFAULT 0",
+        "ALTER TABLE players ADD COLUMN club_name TEXT",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+
+    for key, name, cap, c1, c2, icon, club_mode in DEFAULT_LEAGUES:
         conn.execute(
-            "INSERT OR IGNORE INTO leagues (key, name, capacity, color1, color2, icon) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (key, name, cap, c1, c2, icon),
+            "INSERT OR IGNORE INTO leagues (key, name, capacity, color1, color2, icon, club_mode) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (key, name, cap, c1, c2, icon, club_mode),
         )
     conn.commit()
     conn.close()
@@ -159,7 +179,7 @@ def generate_round_robin(player_ids: list) -> list:
 def compute_standings(conn, league_id: int) -> list:
     players = {
         row["id"]: {
-            "name": row["full_name"], "P": 0, "W": 0, "D": 0, "L": 0,
+            "name": row["club_name"] or row["full_name"], "P": 0, "W": 0, "D": 0, "L": 0,
             "GF": 0, "GA": 0, "PTS": 0,
         }
         for row in conn.execute("SELECT * FROM players WHERE league_id=?", (league_id,))
@@ -203,6 +223,7 @@ def compute_standings(conn, league_id: int) -> list:
 
 class RegisterBody(BaseModel):
     init_data: str
+    club_name: str = None
 
 
 class ResultBody(BaseModel):
@@ -240,6 +261,7 @@ def list_leagues():
             "color1": lg["color1"], "color2": lg["color2"], "icon": lg["icon"],
             "status": lg["status"],
             "full": count >= lg["capacity"],
+            "club_mode": bool(lg["club_mode"]),
         })
     conn.close()
     return result
@@ -259,14 +281,16 @@ def league_detail(league_id: int, init_data: str = ""):
 
     is_registered = False
     is_admin = False
+    my_club = None
     if init_data:
         user = get_user(init_data)
         uid = user.get("id")
         is_admin = uid in ADMIN_IDS
         row = conn.execute(
-            "SELECT 1 FROM players WHERE league_id=? AND telegram_id=?", (league_id, uid)
+            "SELECT club_name FROM players WHERE league_id=? AND telegram_id=?", (league_id, uid)
         ).fetchone()
         is_registered = row is not None
+        my_club = row["club_name"] if row else None
 
     conn.close()
     return {
@@ -275,7 +299,33 @@ def league_detail(league_id: int, init_data: str = ""):
         "color1": lg["color1"], "color2": lg["color2"], "icon": lg["icon"],
         "status": lg["status"], "full": count >= lg["capacity"],
         "is_registered": is_registered, "is_admin": is_admin,
+        "club_mode": bool(lg["club_mode"]), "my_club": my_club,
     }
+
+
+@app.get("/api/leagues/{league_id}/clubs")
+def league_clubs(league_id: int):
+    conn = db()
+    lg = conn.execute("SELECT * FROM leagues WHERE id=?", (league_id,)).fetchone()
+    if lg is None:
+        conn.close()
+        raise HTTPException(404, "Liga topilmadi")
+    if not lg["club_mode"]:
+        conn.close()
+        raise HTTPException(400, "Bu liga klub tanlash rejimida emas")
+
+    taken = {
+        row["club_name"]: row["full_name"]
+        for row in conn.execute(
+            "SELECT club_name, full_name FROM players WHERE league_id=? AND club_name IS NOT NULL",
+            (league_id,),
+        )
+    }
+    conn.close()
+    return [
+        {"name": c, "taken": c in taken, "taken_by": taken.get(c)}
+        for c in DIVISION1_CLUBS
+    ]
 
 
 @app.post("/api/leagues/{league_id}/register")
@@ -297,18 +347,33 @@ def register(league_id: int, body: RegisterBody):
         conn.close()
         raise HTTPException(400, "Liga to'lgan (TO'LIQ)")
 
+    club_name = None
+    if lg["club_mode"]:
+        if not body.club_name or body.club_name not in DIVISION1_CLUBS:
+            conn.close()
+            raise HTTPException(400, "Iltimos, klub tanlang")
+        taken = conn.execute(
+            "SELECT 1 FROM players WHERE league_id=? AND club_name=?",
+            (league_id, body.club_name),
+        ).fetchone()
+        if taken:
+            conn.close()
+            raise HTTPException(400, "Bu klub allaqachon band")
+        club_name = body.club_name
+
     full_name = f'{user.get("first_name", "")} {user.get("last_name", "")}'.strip() or user.get("username", str(user.get("id")))
     try:
         conn.execute(
-            "INSERT INTO players (league_id, telegram_id, full_name, username) VALUES (?, ?, ?, ?)",
-            (league_id, user["id"], full_name, user.get("username")),
+            "INSERT INTO players (league_id, telegram_id, full_name, username, club_name) VALUES (?, ?, ?, ?, ?)",
+            (league_id, user["id"], full_name, user.get("username"), club_name),
         )
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
         raise HTTPException(400, "Siz allaqachon ro'yxatdasiz")
     conn.close()
-    return {"ok": True, "message": "Ro'yxatdan muvaffaqiyatli o'tdingiz"}
+    message = f"{club_name} klubiga ro'yxatdan o'tdingiz! ⚽" if club_name else "Ro'yxatdan muvaffaqiyatli o'tdingiz"
+    return {"ok": True, "message": message}
 
 
 @app.get("/api/leagues/{league_id}/standings")
@@ -327,7 +392,8 @@ def fixtures(league_id: int, round: int = 1):
     conn = db()
     rows = conn.execute(
         """SELECT m.id, m.round_num, m.score1, m.score2, m.played,
-                  p1.full_name AS n1, p2.full_name AS n2
+                  COALESCE(p1.club_name, p1.full_name) AS n1,
+                  COALESCE(p2.club_name, p2.full_name) AS n2
            FROM matches m
            JOIN players p1 ON p1.id = m.player1_id
            JOIN players p2 ON p2.id = m.player2_id
@@ -403,6 +469,7 @@ def enter_result(league_id: int, body: ResultBody):
     conn.close()
     return {"ok": True}
 
+
 import urllib.request
 import json as _json
 
@@ -444,5 +511,7 @@ async def telegram_webhook(update: dict):
                 reply_markup,
             )
     return {"ok": True}
+
+
 # Static frontend fayllarni xizmat qilish (index.html shu yerdan ochiladi)
-app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")
+app.mount("/", StaticFiles(directory="../frontend", html=True), name="frontend")                    
