@@ -5,7 +5,7 @@ function Ranking() {
   const [teams, setTeams] = useState([]);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:5000/users")
+    fetch("https://darkalphatournamentbotbackend.onrender.com/users")
       .then((res) => res.json())
       .then((data) => setTeams(data));
   }, []);
