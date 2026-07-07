@@ -20,7 +20,7 @@ function Home() {
     league?.name?.includes("1-Devizion");
 
   const registerLeague = async (league) => {
-    const response = await fetch("http://127.0.0.1:5000/register", {
+    const response = await fetch("https://darkalphatournamentbotbackend.onrender.com/register", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -64,7 +64,7 @@ function Home() {
         [savedLeague]: 1,
       }));
 
-      fetch("http://127.0.0.1:5000/users")
+      fetch("https://darkalphatournamentbotbackend.onrender.com/users")
         .then((res) => res.json())
         .then((users) => {
           const counts = {};
@@ -78,7 +78,7 @@ function Home() {
         });
     }
 
-    fetch("http://127.0.0.1:5000/matches")
+    fetch("https://darkalphatournamentbotbackend.onrender.com/matches")
       .then((res) => res.json())
       .then((data) => {
         const waiting = data.filter(
@@ -140,7 +140,7 @@ function Home() {
 
             <button
               onClick={async () => {
-                const response = await fetch("http://127.0.0.1:5000/confirm-result", {
+                const response = await fetch("https://darkalphatournamentbotbackend.onrender.com/confirm-result", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ matchId: match.id, username: currentUser.username }),
@@ -158,7 +158,7 @@ function Home() {
 
             <button
               onClick={async () => {
-                const response = await fetch("http://127.0.0.1:5000/complain-result", {
+                const response = await fetch("https://darkalphatournamentbotbackend.onrender.com/complain-result", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ matchId: match.id, username: currentUser.username }),
